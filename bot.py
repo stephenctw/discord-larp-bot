@@ -63,12 +63,22 @@ class GameData:
 game_data = GameData()
 
 GAME_TYPES = {
-    "scary": {"name": "恐怖", "emoji": "👻"},
-    "funny": {"name": "搞笑", "emoji": "😂"},
-    "puzzle": {"name": "解謎", "emoji": "🔍"},
-    "adventure": {"name": "冒險", "emoji": "⚔️"},
     "mystery": {"name": "神秘", "emoji": "🔮"},
-    "fantasy": {"name": "奇幻", "emoji": "🐉"}
+    "murder": {"name": "謀殺懸疑", "emoji": "🔪"},
+    "horror": {"name": "恐怖", "emoji": "👻"},
+    "fantasy": {"name": "奇幻", "emoji": "🐉"},
+    "detective": {"name": "偵探推理", "emoji": "🔍"},
+    "adventure": {"name": "冒險", "emoji": "⚔️"},
+    "heist": {"name": "盜寶行動", "emoji": "💎"},
+    "survival": {"name": "生存", "emoji": "🏕️"},
+    "conspiracy": {"name": "陰謀", "emoji": "🕵️"},
+    "comedy": {"name": "搞笑", "emoji": "😂"},
+    "espionage": {"name": "諜報", "emoji": "🕴️"},
+    "supernatural": {"name": "超自然", "emoji": "👥"},
+    "historical": {"name": "歷史", "emoji": "📜"},
+    "sci_fi": {"name": "科幻", "emoji": "🚀"},
+    "psychological": {"name": "心理驚悚", "emoji": "🧠"},
+    "escape": {"name": "密室逃脫", "emoji": "🚪"}
 }
 
 class GameSetupState:
@@ -88,18 +98,29 @@ LANGUAGE_OPTIONS = {
     "🌐": {"code": "both", "name": "English + 繁體中文"}
 }
 
-async def get_ai_response(prompt, game_state=None):
+async def get_ai_response(prompt, game_state=None, language='both'):
     try:
-        messages = [
-            {"role": "system", "content": """你是一位經驗豐富的LARP遊戲主持人。創造引人入勝的敘事並回應玩家行動。
-            請使用繁體中文回應，格式如下：
+        # 根據語言設置不同的系統提示
+        system_prompts = {
+            'en': """You are an experienced LARP game master. Create engaging narratives and respond to player actions.
+            Respond in English only.""",
+            
+            'zh': """你是一位經驗豐富的LARP遊戲主持人。創造引人入勝的敘事並回應玩家行動。
+            請只使用繁體中文回應。""",
+            
+            'both': """You are an experienced LARP game master. Create engaging narratives and respond to player actions.
+            Provide responses in both English and Traditional Chinese using this format:
             
             [EN]
-            (English response here)
+            (English response)
             
             [繁中]
             (繁體中文回應)
-            """},
+            """
+        }
+
+        messages = [
+            {"role": "system", "content": system_prompts[language]},
             {"role": "user", "content": prompt}
         ]
         
@@ -109,100 +130,22 @@ async def get_ai_response(prompt, game_state=None):
         response = client.chat.completions.create(
             model="gpt-3.5-turbo-1106",
             messages=messages,
-            max_tokens=600,  # Increased for dual-language response
+            max_tokens=600,
             temperature=0.7
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"OpenAI API Error: {str(e)}")  # Debug print
-        return """Error: Unable to generate story. Please try again in a moment.
-        
-        錯誤：無法生成故事。請稍後再試。"""
+        print(f"OpenAI API Error: {str(e)}")
+        error_messages = {
+            'en': "Error: Unable to generate story. Please try again in a moment.",
+            'zh': "錯誤：無法生成故事。請稍後再試。",
+            'both': "Error: Unable to generate story. Please try again in a moment.\n\n錯誤：無法生成故事。請稍後再試。"
+        }
+        return error_messages[language]
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
-
-@bot.command(name='create_character')
-async def create_character(ctx, character_name: str):
-    user_id = str(ctx.author.id)
-    if user_id in game_data.characters:
-        await ctx.send("You already have a character! Use !delete_character first to create a new one.\n你已經有一個角色了！請先使用 !delete_character 刪除現有角色。")
-        return
-
-    game_data.characters[user_id] = {
-        'name': character_name,
-        'stats': {
-            'strength': 10,
-            'dexterity': 10,
-            'constitution': 10,
-            'intelligence': 10,
-            'wisdom': 10,
-            'charisma': 10
-        },
-        'inventory': [],
-        'health': 100
-    }
-    game_data.save_data()
-    await ctx.send(f"Character '{character_name}' created successfully!\n角色 '{character_name}' 創建成功！")
-
-@bot.command(name='stats')
-async def show_stats(ctx):
-    user_id = str(ctx.author.id)
-    if user_id not in game_data.characters:
-        await ctx.send("You don't have a character yet! Use !create_character to make one.\n你還沒有角色！請使用 !create_character 創建一個。")
-        return
-
-    character = game_data.characters[user_id]
-    stats_message = f"**{character['name']}'s Stats | {character['name']}的屬性:**\n"
-    
-    stat_translations = {
-        'strength': '力量',
-        'dexterity': '敏捷',
-        'constitution': '體質',
-        'intelligence': '智力',
-        'wisdom': '智慧',
-        'charisma': '魅力'
-    }
-    
-    for stat, value in character['stats'].items():
-        stats_message += f"{stat.capitalize()} | {stat_translations[stat]}: {value}\n"
-    stats_message += f"Health | 生命值: {character['health']}"
-    
-    await ctx.send(stats_message)
-
-@bot.command(name='inventory')
-async def show_inventory(ctx):
-    user_id = str(ctx.author.id)
-    if user_id not in game_data.characters:
-        await ctx.send("You don't have a character yet! Use !create_character to make one.")
-        return
-
-    character = game_data.characters[user_id]
-    if not character['inventory']:
-        await ctx.send(f"{character['name']}'s inventory is empty!")
-    else:
-        inventory_list = "\n".join(character['inventory'])
-        await ctx.send(f"**{character['name']}'s Inventory:**\n{inventory_list}")
-
-@bot.command(name='roll')
-async def roll_dice(ctx, skill: str):
-    import random
-    user_id = str(ctx.author.id)
-    if user_id not in game_data.characters:
-        await ctx.send("You don't have a character yet! Use !create_character to make one.")
-        return
-
-    character = game_data.characters[user_id]
-    if skill.lower() not in character['stats']:
-        await ctx.send(f"Invalid skill! Available skills: {', '.join(character['stats'].keys())}")
-        return
-
-    base_stat = character['stats'][skill.lower()]
-    roll = random.randint(1, 20)
-    total = roll + (base_stat - 10) // 2
-
-    await ctx.send(f"{character['name']} rolled for {skill}: {roll} + {(base_stat - 10) // 2} = {total}")
 
 @bot.command(name='start_game')
 async def start_game(ctx):
@@ -210,7 +153,7 @@ async def start_game(ctx):
     channel_id = str(ctx.channel.id)
     
     if channel_id in game_data.active_games:
-        await ctx.send("A game is already in progress! Use !force_restart to start a new game.\n遊戲已經在進行中！使用 !force_restart 來開始新遊戲。")
+        await ctx.send("A game is already in progress! Must end it before start a new game.\n遊戲已經在進行中！使用 !end_game 來結束目前遊戲。")
         return
 
     setup_state.waiting_for_players[channel_id] = True
@@ -235,13 +178,76 @@ async def start_game(ctx):
             cleanup_setup_state(channel_id)
             return
         
-        # Create game type voting message
-        game_types_str = "\n".join([f"{info['emoji']} {k.capitalize()}: {info['name']}" for k, info in GAME_TYPES.items()])
+        # 將遊戲類型分類顯示
+        game_types_str = "**🎲 Choose Game Type | 選擇遊戲類型**\n\n"
+        
+        categories = {
+            "Mystery & Detective": ["mystery", "murder", "detective", "psychological", "conspiracy"],
+            "Adventure & Action": ["adventure", "heist", "survival", "escape"],
+            "Fantasy & Supernatural": ["fantasy", "supernatural", "horror", "sci_fi"],
+            "Special Themes": ["historical", "espionage", "comedy"],
+        }
+        
+        for category, types in categories.items():
+            game_types_str += f"**{category}**\n"
+            for game_type in types:
+                info = GAME_TYPES[game_type]
+                game_types_str += f"{info['emoji']} {game_type.capitalize()}: {info['name']}\n"
+            game_types_str += "\n"
+
         embed = discord.Embed(
             title="Vote for Game Type | 投票選擇遊戲類型",
             description=f"React to vote! (10 seconds)\n請投票！（10秒）\n\n{game_types_str}",
             color=discord.Color.green()
         )
+        
+        # 添加遊戲類型說明
+        type_descriptions = {
+            'en': {
+                "mystery": "Solve complex mysteries and uncover hidden truths",
+                "murder": "Investigate murders and find the killer",
+                "detective": "Use deduction and evidence to solve cases",
+                "psychological": "Explore psychological tensions and mind games",
+                "conspiracy": "Uncover and navigate through intricate conspiracies",
+                "adventure": "Embark on exciting journeys and face challenges",
+                "heist": "Plan and execute elaborate heists",
+                "survival": "Survive against harsh conditions or threats",
+                "escape": "Find ways to escape from confined situations",
+                "fantasy": "Experience magical and mythical adventures",
+                "supernatural": "Deal with supernatural phenomena",
+                "horror": "Face terrifying situations and creatures",
+                "sci_fi": "Explore futuristic and technological scenarios",
+                "historical": "Experience adventures in historical settings",
+                "espionage": "Engage in spy missions and covert operations",
+                "comedy": "Enjoy humorous situations and interactions"
+            },
+            'zh': {
+                "mystery": "解開複雜謎團，揭露隱藏真相",
+                "murder": "調查謀殺案件，找出兇手",
+                "detective": "運用推理和證據解決案件",
+                "psychological": "探索心理張力和心智博弈",
+                "conspiracy": "揭露並應對錯綜複雜的陰謀",
+                "adventure": "展開刺激的冒險旅程",
+                "heist": "策劃並執行精密的盜寶行動",
+                "survival": "在惡劣環境或威脅中求生",
+                "escape": "想辦法逃離受限的處境",
+                "fantasy": "體驗魔法和神話冒險",
+                "supernatural": "應對超自然現象",
+                "horror": "面對恐怖的處境和生物",
+                "sci_fi": "探索未來科技場景",
+                "historical": "體驗歷史背景中的冒險",
+                "espionage": "執行間諜任務和秘密行動",
+                "comedy": "享受幽默有趣的情境互動"
+            }
+        }
+
+        # 根據選擇的語言添加說明
+        selected_lang = game_data.game_languages.get(str(ctx.channel.id), 'both')
+        if selected_lang in ['en', 'both']:
+            embed.add_field(name="Game Type Descriptions", value="\n".join(f"{GAME_TYPES[t]['emoji']} **{t.capitalize()}**: {type_descriptions['en'][t]}" for t in GAME_TYPES), inline=False)
+        if selected_lang in ['zh', 'both']:
+            embed.add_field(name="遊戲類型說明", value="\n".join(f"{GAME_TYPES[t]['emoji']} **{GAME_TYPES[t]['name']}**: {type_descriptions['zh'][t]}" for t in GAME_TYPES), inline=False)
+
         vote_msg = await ctx.send(embed=embed)
         
         # Add reactions for voting
@@ -291,10 +297,6 @@ async def on_reaction_add(reaction, user):
         if user.id not in setup_state.joined_players[channel_id]:
             setup_state.joined_players[channel_id].append(user.id)
             await reaction.message.channel.send(f"{user.name} has joined the game! | {user.name} 已加入遊戲！")
-
-@bot.command(name='set_type')
-async def set_game_type(ctx, game_type: str):
-    await ctx.send("Game type is now selected through voting! Use !start_game to begin.\n遊戲類型現在通過投票選擇！使用 !start_game 開始。")
 
 # 添加一個分割訊息的輔助函數
 async def send_long_message(ctx, content, title=None, color=None, is_embed=True):
@@ -438,18 +440,62 @@ CURRENT SITUATION:
 (當前場景描述)
 """
 
-    response = await get_ai_response(prompt)
+    response = await get_ai_response(prompt, language=selected_lang)
     game_data.game_states[channel_id] = {
         'current_scene': response,
         'progress': 0,
-        'completed_objectives': []
+        'completed_objectives': [],
+        'main_objective': '',  # 儲存主要目標
+        'key_requirements': []  # 儲存完成目標需要的關鍵條件
     }
     
+    # 解析並儲存主要目標和關鍵要求
+    if selected_lang == 'en':
+        objective_prompt = f"""Based on the story setup:
+1. Extract the main objective in a clear, measurable statement
+2. List 3-5 specific key requirements that must ALL be met to complete the objective
+3. Format as JSON:
+{{
+    "main_objective": "objective statement",
+    "key_requirements": ["req1", "req2", "req3"]
+}}"""
+    elif selected_lang == 'zh':
+        objective_prompt = f"""根據故事設定：
+1. 提取明確、可衡量的主要目標
+2. 列出3-5個必須全部達成才能完成目標的具體關鍵要求
+3. 以JSON格式輸出：
+{{
+    "main_objective": "目標陳述",
+    "key_requirements": ["要求1", "要求2", "要求3"]
+}}"""
+    else:
+        objective_prompt = f"""Based on the story setup, provide in both languages:
+1. Extract the main objective in a clear, measurable statement
+2. List 3-5 specific key requirements that must ALL be met to complete the objective
+3. Format as JSON:
+{{
+    "main_objective": {{
+        "en": "objective statement",
+        "zh": "目標陳述"
+    }},
+    "key_requirements": {{
+        "en": ["req1", "req2", "req3"],
+        "zh": ["要求1", "要求2", "要求3"]
+    }}
+}}"""
+
+    objective_response = await get_ai_response(objective_prompt, language=selected_lang)
+    try:
+        objectives = json.loads(objective_response)
+        game_data.game_states[channel_id].update(objectives)
+    except:
+        print("Error parsing objectives JSON")
+
     # 發送初始故事
     await send_long_message(
         ctx,
         response,
-        title="🎮 New Adventure Begins | 新冒險開始",
+        title=get_title("🎮 New Adventure Begins", "新冒險開始", selected_lang),
         color=discord.Color.gold()
     )
     
@@ -499,21 +545,17 @@ CHARACTER:
 
 Provide response in both English and Traditional Chinese."""
 
-        role_info = await get_ai_response(role_prompt)
+        role_info = await get_ai_response(role_prompt, language=selected_lang)
         try:
             await send_long_message(
-                user,  # 注意這裡是發送給用戶的私訊
+                user,
                 role_info,
-                title="🎭 Your Character | 你的角色",
+                title=get_title("Your Character", "你的角色", selected_lang),
                 color=discord.Color.blue()
             )
         except discord.Forbidden:
-            error_msg = {
-                'en': f"Couldn't send DM to {user.name}. Please enable DMs from server members.",
-                'zh': f"無法向 {user.name} 發送私訊。請啟用伺服器成員的私訊功能。",
-                'both': f"Couldn't send DM to {user.name}. Please enable DMs from server members.\n無法向 {user.name} 發送私訊。請啟用伺服器成員的私訊功能。"
-            }
-            await ctx.send(error_msg[selected_lang])
+            error_msg = get_error_message("Couldn't send DM to", "無法向", user.name, selected_lang)
+            await ctx.send(error_msg)
     
     # 顯示遊戲指南（根據選擇的語言）
     guide_descriptions = {
@@ -524,7 +566,6 @@ No need to use any commands for roleplay.
 Available commands:
 !scene - Review the current scene and objectives
 !story - View story history
-!stats - Check your character stats
 !end_game - End the game session
 """,
         'zh': """
@@ -534,7 +575,6 @@ Available commands:
 可用指令：
 !scene - 查看當前場景和任務目標
 !story - 查看故事歷史
-!stats - 查看角色屬性
 !end_game - 結束遊戲
 """,
         'both': """
@@ -553,7 +593,6 @@ Available commands:
 可用指令：
 !scene - 查看當前場景和任務目標
 !story - 查看故事歷史
-!stats - 查看角色屬性
 !end_game - 結束遊戲
 """
     }
@@ -590,25 +629,6 @@ def cleanup_setup_state(channel_id):
         del setup_state.joined_players[channel_id]
     if channel_id in setup_state.game_type:
         del setup_state.game_type[channel_id]
-
-@bot.command(name='force_restart')
-async def force_restart(ctx):
-    """Force restart the game"""
-    channel_id = str(ctx.channel.id)
-    
-    if channel_id in game_data.active_games:
-        del game_data.active_games[channel_id]
-    if channel_id in game_data.game_states:
-        del game_data.game_states[channel_id]
-    if channel_id in game_data.game_players:
-        del game_data.game_players[channel_id]
-    if channel_id in game_data.game_objectives:
-        del game_data.game_objectives[channel_id]
-    
-    cleanup_setup_state(channel_id)
-    game_data.save_data()
-    
-    await ctx.send("Game has been forcefully reset. Use !start_game to start a new game.\n遊戲已被強制重置。使用 !start_game 開始新遊戲。")
 
 @bot.command(name='end_game')
 async def end_game(ctx):
@@ -728,44 +748,68 @@ async def process_action(message):
     action_text = message.content
     selected_lang = game_data.game_languages.get(channel_id, 'both')
     
-    if selected_lang == 'en':
-        prompt = f"""
-Player {message.author.name} roleplays: {action_text}
+    # 構建更嚴格的完成檢查提示
+    completion_check_prompt = f"""
+Player action: {action_text}
 Current scene: {current_state['current_scene']}
 
-Evaluate this roleplay action and respond appropriately. If the main objective is completed, include [GAME_COMPLETE] at the start of your response.
-Respond in English only.
-"""
-    elif selected_lang == 'zh':
-        prompt = f"""
-玩家 {message.author.name} 的角色扮演: {action_text}
-當前場景: {current_state['current_scene']}
+Main objective: {current_state['main_objective']}
+Required conditions: {current_state['key_requirements']}
 
-評估此角色扮演行動並作出適當回應。如果主要目標已完成，請在回應開頭加上 [GAME_COMPLETE]。
-請只使用繁體中文回應。
-"""
-    else:
-        prompt = f"""
-Player {message.author.name} roleplays: {action_text}
-Current scene: {current_state['current_scene']}
+Strictly evaluate if this action contributes to or completes the objective.
+1. Check each requirement carefully
+2. Only mark as complete if ALL requirements are fully met
+3. If complete, explain how each requirement was met
+4. If not complete, explain what's still missing
 
-Evaluate this roleplay action and respond appropriately. If the main objective is completed, include [GAME_COMPLETE] at the start of your response.
-Respond in both English and Traditional Chinese.
+If ALL requirements are met, start response with [GAME_COMPLETE]
+Otherwise, evaluate the action and progress normally.
 """
 
-    response = await get_ai_response(prompt, current_state)
-    current_state['current_scene'] = response
+    response = await get_ai_response(completion_check_prompt, current_state, language=selected_lang)
     
-    # 檢查是否完成遊戲
     if response.startswith("[GAME_COMPLETE]"):
+        # 確認完成後自動結束遊戲
         await handle_game_completion(message.channel, channel_id, response)
-    else:
-        await update_story_message(message.channel, channel_id, response, action_text, message.author.name)
         
+        # 發送遊戲結束通知
+        end_titles = {
+            'en': "🎊 Adventure Successfully Completed!",
+            'zh': "🎊 冒險成功完成！",
+            'both': "🎊 Adventure Successfully Completed! | 冒險成功完成！"
+        }
+        
+        end_messages = {
+            'en': f"All objectives have been met! The game has ended.\nMain Objective: {current_state['main_objective']}",
+            'zh': f"所有目標都已達成！遊戲已結束。\n主要目標：{current_state['main_objective']}",
+            'both': f"""All objectives have been met! The game has ended.
+Main Objective: {current_state['main_objective']}
+
+所有目標都已達成！遊戲已結束。
+主要目標：{current_state['main_objective']}"""
+        }
+        
+        end_embed = discord.Embed(
+            title=end_titles[selected_lang],
+            description=end_messages[selected_lang],
+            color=discord.Color.gold()
+        )
+        await message.channel.send(embed=end_embed)
+        
+        # 清理遊戲狀態
+        del game_data.active_games[channel_id]
+        del game_data.game_states[channel_id]
+        del game_data.game_players[channel_id]
+        if channel_id in game_data.game_objectives:
+            del game_data.game_objectives[channel_id]
+        game_data.save_data()
+    else:
+        current_state['current_scene'] = response
+        await update_story_message(message.channel, channel_id, response, action_text, message.author.name)
         await send_long_message(
             message.channel,
             response,
-            title="Roleplay Response | 角色扮演回應",
+            title=get_title("Roleplay Response", "角色扮演回應", selected_lang),
             color=discord.Color.green()
         )
 
@@ -784,6 +828,24 @@ async def handle_game_completion(ctx, channel_id, final_scene):
     if channel_id in game_data.game_objectives:
         del game_data.game_objectives[channel_id]
     game_data.save_data()
+
+# 添加一個輔助函數來生成標題
+def get_title(en_text, zh_text, language):
+    if language == 'en':
+        return f"🎭 {en_text}"
+    elif language == 'zh':
+        return f"🎭 {zh_text}"
+    else:
+        return f"🎭 {en_text} | {zh_text}"
+
+# 添加一個輔助函數來生成錯誤訊息
+def get_error_message(en_prefix, zh_prefix, name, language):
+    if language == 'en':
+        return f"{en_prefix} {name}. Please enable DMs from server members."
+    elif language == 'zh':
+        return f"{zh_prefix} {name} 發送私訊。請啟用伺服器成員的私訊功能。"
+    else:
+        return f"{en_prefix} {name}. Please enable DMs from server members.\n{zh_prefix} {name} 發送私訊。請啟用伺服器成員的私訊功能。"
 
 if __name__ == "__main__":
     bot.run(TOKEN) 
