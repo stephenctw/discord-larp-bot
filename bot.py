@@ -7,6 +7,7 @@ from pathlib import Path
 from openai import OpenAI
 import asyncio
 import random
+import unicodedata
 
 # Load environment variables
 load_dotenv()
@@ -132,7 +133,7 @@ SYSTEM_MESSAGES = {
     "no_language_selected": "No language selected, defaulting to bilingual mode.",
     "language_selected": "Selected language: {language}",
     "new_game_init": "New Game Initialization",
-    "join_prompt": "React with 👍 to join the game! (Waiting for 2-6 players)",
+    "join_prompt": "React with 👍 to join the game! (Waiting for 2+ players)",
     "game_type_selection": "Choose Game Type",
     "vote_prompt": "React to vote! (10 seconds)",
     "game_type_descriptions": "Game Type Descriptions",
@@ -156,37 +157,90 @@ Available commands:
 # Translation helper functions
 async def translate_text(text, to_lang='zh'):
     """Translate text between English and Traditional Chinese"""
-    if to_lang == 'zh':
-        prompt = f"""Translate the following English text to Traditional Chinese.
-Keep all formatting, emojis, and special characters unchanged.
-Only translate the actual text content.
+    if not text or not isinstance(text, str):
+        return text
+        
+    if to_lang not in ['zh', 'en']:
+        return text
 
-Text to translate:
-{text}"""
-    else:  # to English
-        prompt = f"""Translate the following Traditional Chinese text to English.
-Keep all formatting, emojis, and special characters unchanged.
-Only translate the actual text content.
-
-Text to translate:
-{text}"""
-    
     try:
+        prompt = f"""Translate the following {'English' if to_lang == 'zh' else 'Traditional Chinese'} text to {'Traditional Chinese' if to_lang == 'zh' else 'English'}.
+Keep all formatting, emojis, and special characters unchanged.
+Only translate the actual text content.
+
+Text to translate:
+{text}"""
+        
         response = await get_ai_response(prompt)
-        return response
+        return response if isinstance(response, str) else text
     except Exception as e:
         print(f"Translation error: {e}")
         return text
 
+def is_chinese(text):
+    """Check if text contains Chinese characters"""
+    # Method 1: Simple range check for Chinese unicode blocks
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff':  # Basic Chinese characters
+            return True
+    return False
+
+def detect_language(text):
+    """
+    Detect if text is primarily English or Chinese
+    Returns: 'en', 'zh', or 'mixed'
+    """
+    if not text:
+        return 'en'
+        
+    chinese_count = 0
+    english_count = 0
+    
+    for char in text:
+        # Skip spaces and punctuation
+        if char.isspace() or unicodedata.category(char).startswith('P'):
+            continue
+            
+        # Check for Chinese characters
+        if '\u4e00' <= char <= '\u9fff':
+            chinese_count += 1
+        # Check for English characters
+        elif char.isascii() and char.isalpha():
+            english_count += 1
+    
+    # If no valid characters found
+    if chinese_count == 0 and english_count == 0:
+        return 'en'
+    
+    # Calculate ratio
+    total = chinese_count + english_count
+    chinese_ratio = chinese_count / total
+    
+    # Determine primary language
+    if chinese_ratio > 0.7:  # More than 70% Chinese
+        return 'zh'
+    elif chinese_ratio < 0.3:  # More than 70% English
+        return 'en'
+    else:
+        return 'mixed'
+
 async def process_user_input(text, selected_lang):
     """Process user input based on selected language"""
-    if selected_lang == 'zh':
-        # Translate Chinese input to English for processing
+    input_lang = detect_language(text)
+    
+    # If input is Chinese, translate to English
+    if input_lang == 'zh' or input_lang == 'mixed':
         return await translate_text(text, to_lang='en')
     return text
 
 async def format_output(text, selected_lang):
     """Format output based on selected language"""
+    if not text or not isinstance(text, str):
+        return text
+        
+    if selected_lang not in ['en', 'zh', 'both']:
+        return text
+
     MAX_LENGTH = 2000  # Discord's message length limit
 
     if not text:
@@ -247,56 +301,79 @@ async def format_output(text, selected_lang):
 # Message handling functions
 async def send_message(ctx, content, title=None, color=None):
     """Send a message in the appropriate language format"""
-    MAX_EMBEDS = 25   # Discord's embed limit per message
-    
-    # Get channel ID and language setting
-    if isinstance(ctx, discord.TextChannel):
-        channel_id = str(ctx.id)
-    elif isinstance(ctx, discord.User) or isinstance(ctx, discord.Member):
-        channel_id = None
-    else:
-        channel_id = str(ctx.channel.id)
-    
-    selected_lang = game_data.game_languages.get(channel_id, 'both') if channel_id else 'en'
-    
-    # Format content and title
-    formatted_content = await format_output(content, selected_lang)
-    formatted_title = await format_output(title, selected_lang) if title else None
-    
-    # Handle content as list or single string
-    if isinstance(formatted_content, list):
-        parts = formatted_content
-    else:
-        parts = [formatted_content]
-    
-    # Send parts in batches
-    current_batch = []
-    batch_number = 1
-    total_batches = (len(parts) + MAX_EMBEDS - 1) // MAX_EMBEDS
-    
-    for i, part in enumerate(parts):
-        if selected_lang == 'zh':
-            part_title = f"{formatted_title} (第{i+1}/{len(parts)}部分)" if formatted_title else f"第{i+1}/{len(parts)}部分"
+    if not ctx:
+        print("Error: No context provided")
+        return
+        
+    if not content:
+        print("Warning: Empty content")
+        content = "No content available"
+
+    try:
+        MAX_EMBEDS = 25   # Discord's embed limit per message
+        
+        # Get channel ID and language setting
+        if isinstance(ctx, discord.TextChannel):
+            channel_id = str(ctx.id)
+        elif isinstance(ctx, discord.User) or isinstance(ctx, discord.Member):
+            channel_id = None
         else:
-            part_title = f"{formatted_title} (Part {i+1}/{len(parts)})" if formatted_title else f"Part {i+1}/{len(parts)}"
+            channel_id = str(ctx.channel.id)
         
-        embed = discord.Embed(
-            title=part_title,
-            description=part,
-            color=color or discord.Color.blue()
-        )
-        current_batch.append(embed)
+        selected_lang = game_data.game_languages.get(channel_id, 'both') if channel_id else 'en'
         
-        if len(current_batch) >= MAX_EMBEDS or i == len(parts) - 1:
-            if total_batches > 1:
-                batch_msg = "批次" if selected_lang == 'zh' else "Batch"
-                await ctx.send(f"{batch_msg} {batch_number}/{total_batches}")
-            if isinstance(ctx, (discord.TextChannel, discord.User, discord.Member)):
-                await ctx.send(embeds=current_batch)
+        # Format content and title
+        formatted_content = await format_output(content, selected_lang)
+        formatted_title = await format_output(title, selected_lang) if title else None
+        
+        # Handle content as list or single string
+        if isinstance(formatted_content, list):
+            parts = formatted_content
+        else:
+            parts = [formatted_content]
+        
+        # Validate parts before sending
+        if not isinstance(parts, list):
+            parts = [str(parts)]
+            
+        for part in parts:
+            if not isinstance(part, str):
+                part = str(part)
+        
+        # Send parts in batches
+        current_batch = []
+        batch_number = 1
+        total_batches = (len(parts) + MAX_EMBEDS - 1) // MAX_EMBEDS
+        
+        for i, part in enumerate(parts):
+            if selected_lang == 'zh':
+                part_title = f"{formatted_title} (第{i+1}/{len(parts)}部分)" if formatted_title else f"第{i+1}/{len(parts)}部分"
             else:
-                await ctx.send(embeds=current_batch)
-            current_batch = []
-            batch_number += 1
+                part_title = f"{formatted_title} (Part {i+1}/{len(parts)})" if formatted_title else f"Part {i+1}/{len(parts)}"
+            
+            embed = discord.Embed(
+                title=part_title,
+                description=part,
+                color=color or discord.Color.blue()
+            )
+            current_batch.append(embed)
+            
+            if len(current_batch) >= MAX_EMBEDS or i == len(parts) - 1:
+                if total_batches > 1:
+                    batch_msg = "批次" if selected_lang == 'zh' else "Batch"
+                    await ctx.send(f"{batch_msg} {batch_number}/{total_batches}")
+                if isinstance(ctx, (discord.TextChannel, discord.User, discord.Member)):
+                    await ctx.send(embeds=current_batch)
+                else:
+                    await ctx.send(embeds=current_batch)
+                current_batch = []
+                batch_number += 1
+    except Exception as e:
+        print(f"Error in send_message: {e}")
+        try:
+            await ctx.send("Error: Could not send message")
+        except:
+            print("Could not send error message")
 
 @bot.event
 async def on_ready():
@@ -343,7 +420,6 @@ async def start_game(ctx):
     
     if channel_id in setup_state.waiting_for_players:
         player_count = len(setup_state.joined_players[channel_id])
-        # debug
         if player_count < 2:
             await send_message(ctx, SYSTEM_MESSAGES["not_enough_players"])
             cleanup_setup_state(channel_id)
@@ -558,10 +634,13 @@ Format as JSON:
     objectives_response = await get_larp_response(objective_prompt)
     try:
         objective = {}
-        if objectives_response.startswith("```json") and objectives_response.endswith("```"):
-            objectives = json.loads(objectives_response[8:-3].strip())  # Remove the markers and strip whitespace
+        if isinstance(objectives_response, str):
+            if objectives_response.startswith("```json") and objectives_response.endswith("```"):
+                objectives = json.loads(objectives_response[8:-3].strip())  # Remove the markers and strip whitespace
+            else:
+                objectives = json.loads(objectives_response)
         else:
-            objectives = json.loads(objectives_response)
+            raise ValueError("Invalid response format")
 
         game_data.game_states[channel_id] = {
             'current_scene': initial_story,
@@ -570,8 +649,8 @@ Format as JSON:
             'main_objective': objectives['main_objective'],
             'key_requirements': objectives['key_requirements']
         }
-    except json.JSONDecodeError:
-        print("Error parsing objectives JSON")
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"Error parsing objectives JSON: {str(e)}")
         game_data.game_states[channel_id] = {
             'current_scene': initial_story,
             'progress': 0,
@@ -638,7 +717,7 @@ async def get_ai_response(prompt):
         response = client.chat.completions.create(
             model="gpt-3.5-turbo-1106",
             messages=messages,
-            max_tokens=1200,
+            max_tokens=2000,
             temperature=0.7
         )
         return response.choices[0].message.content
@@ -767,7 +846,11 @@ async def update_story_message(ctx, channel_id, new_content, action=None, actor=
         story_summary += f"➡️ {event['result']}\n"
     
     story_summary += "\n**Current Scene:**\n"
-    story_summary += game_data.game_states[channel_id]['current_scene']
+    # Check if current_scene is a string before concatenation
+    if isinstance(game_data.game_states[channel_id]['current_scene'], str):
+        story_summary += game_data.game_states[channel_id]['current_scene']
+    else:
+        story_summary += "Current scene data is not available."
 
     await send_message(
         ctx,
@@ -799,8 +882,23 @@ async def on_message(message):
 
 async def process_action(message):
     """Process player's roleplay action"""
+    if not message or not message.content:
+        return
+        
     channel_id = str(message.channel.id)
+    
+    # Validate game state
+    if channel_id not in game_data.active_games:
+        return
+    if channel_id not in game_data.game_states:
+        game_data.active_games.pop(channel_id, None)
+        return
+        
     current_state = game_data.game_states[channel_id]
+    if not isinstance(current_state, dict):
+        print(f"Invalid game state for channel {channel_id}")
+        return
+        
     selected_lang = game_data.game_languages.get(channel_id, 'both')
     
     # Translate user input if needed
@@ -826,7 +924,7 @@ Otherwise, evaluate the action and progress normally.
     response = await get_larp_response(completion_check_prompt, current_state)
     formatted_response = await format_output(response, selected_lang)
     
-    if formatted_response.startswith("[GAME_COMPLETE]"):
+    if isinstance(formatted_response, str) and formatted_response.startswith("[GAME_COMPLETE]"):
         await handle_game_completion(message.channel, channel_id, formatted_response)
         
         await send_message(
@@ -863,22 +961,35 @@ Otherwise, evaluate the action and progress normally.
 
 async def handle_game_completion(ctx, channel_id, final_scene):
     """Handle game completion and cleanup"""
-    selected_lang = game_data.game_languages.get(channel_id, 'both')
-    
-    await send_message(
-        ctx,
-        final_scene.replace("[GAME_COMPLETE]", ""),
-        title=SYSTEM_MESSAGES["game_complete"],
-        color=discord.Color.gold()
-    )
-    
-    # Clean up game state
-    del game_data.active_games[channel_id]
-    del game_data.game_states[channel_id]
-    del game_data.game_players[channel_id]
-    if channel_id in game_data.game_objectives:
-        del game_data.game_objectives[channel_id]
-    game_data.save_data()
+    if not ctx or not channel_id:
+        return
+        
+    try:
+        selected_lang = game_data.game_languages.get(channel_id, 'both')
+        
+        # Ensure final_scene is a string before using replace
+        final_content = final_scene.replace("[GAME_COMPLETE]", "") if isinstance(final_scene, str) else str(final_scene)
+        
+        await send_message(
+            ctx,
+            final_content,
+            title=SYSTEM_MESSAGES["game_complete"],
+            color=discord.Color.gold()
+        )
+        
+        # Clean up game state with checks
+        game_data.active_games.pop(channel_id, None)
+        game_data.game_states.pop(channel_id, None)
+        game_data.game_players.pop(channel_id, None)
+        game_data.game_objectives.pop(channel_id, None)
+        
+        game_data.save_data()
+    except Exception as e:
+        print(f"Error in handle_game_completion: {e}")
+        try:
+            await ctx.send("Error: Could not complete game properly")
+        except:
+            print("Could not send error message")
 
 if __name__ == "__main__":
     bot.run(TOKEN) 
